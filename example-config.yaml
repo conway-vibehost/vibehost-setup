@@ -1,0 +1,167 @@
+# vibehost-config.yaml
+# Example configuration for vibehost-setup
+
+# Storage configuration (optional)
+# By default, uses a 100GiB ZFS loopback file on the root filesystem.
+# If you have a dedicated disk, specify it here for better performance.
+# storage:
+#   device: "/dev/sda"       # Use entire disk for ZFS (WARNING: will be formatted!)
+
+# Server access (script needs to get root somehow)
+server:
+  host: "203.0.113.1"                    # IP or hostname
+  auth_method: "password"                 # "password" | "ssh_key"
+  ssh_user: "root"                        # Initial user (often root for fresh server)
+  ssh_password: "provider-given-pw"       # If auth_method is password
+  # ssh_key_path: "~/.ssh/id_ed25519"     # If auth_method is ssh_key
+  ssh_port: 22
+
+# New admin user (created by script, replaces root login)
+admin:
+  username: "vibehost"
+  ssh_public_key: "ssh-ed25519 AAAA... customer@laptop"
+
+# Network configuration
+network:
+  interface: "eno1"                       # Host's physical interface
+  gateway: "203.0.113.1"                  # Network gateway
+  netmask: "255.255.255.0"                # Or CIDR /24
+
+  # Public IPs to assign
+  ips:
+    host: "203.0.113.1"
+    dev: "203.0.113.2"
+    staging: "203.0.113.3"
+    prod: "203.0.113.4"
+    spare: "203.0.113.5"
+
+  # Private network for inter-container communication
+  private:
+    subnet: "10.10.10.0/24"
+    gateway: "10.10.10.1"
+    postgres: "10.10.10.5"
+
+# Resource pool configuration (soft limits, can burst)
+resources:
+  dev:
+    memory: "32GB"
+    cpu_allowance: "50%"
+    cpu_priority: 10
+  staging:
+    memory: "8GB"
+    cpu_allowance: "12%"
+    cpu_priority: 5
+  prod:
+    memory: "16GB"
+    cpu_allowance: "25%"
+    cpu_priority: 7
+  postgres:
+    memory: "16GB"
+    cpu_allowance: "25%"
+    cpu_priority: 6
+
+# Postgres configuration
+postgres:
+  version: "16"
+  databases:
+    - name: "app_dev"
+      user: "app"
+      password: "generate"               # "generate" = script creates random pw
+    - name: "app_staging"
+      user: "app"
+      password: "generate"
+    - name: "app_prod"
+      user: "app"
+      password: "generate"
+
+# Backup configuration
+backups:
+  snapshots:
+    enabled: true
+    retention_days: 7
+    schedule: "0 2 * * *"                # 2 AM daily
+
+  offsite:
+    enabled: false                        # Set to true and fill in details
+    provider: "hetzner"                  # Currently only hetzner supported
+    storagebox_host: "uXXXXXX.your-storagebox.de"
+    storagebox_user: "uXXXXXX"
+    ssh_key_path: "/root/.ssh/storagebox_key"   # Script will generate if missing
+    retention_weeks: 4
+    schedule: "0 3 * * 0"                # 3 AM Sundays
+
+# Dev container packages and tools
+dev_setup:
+  # System packages
+  packages:
+    - build-essential
+    - git
+    - curl
+    - wget
+    - htop
+    - ncdu
+    - tree
+    - tmux
+    - vim
+    - jq
+    - unzip
+    - direnv
+
+  # Python setup
+  python:
+    version: "3.12"
+    global_packages:
+      - jupyter
+      - pandas
+      - numpy
+      - requests
+      - httpx
+      - polars
+      - duckdb
+      - sqlalchemy
+      - psycopg2-binary
+      - python-dotenv
+      - ruff
+      - ipython
+
+  # Node.js setup
+  node:
+    version: "20"                        # LTS
+    global_packages:
+      - pnpm
+      - tsx
+      - nodemon
+      - wrangler
+
+  # Additional tools
+  extras:
+    - claude_code: true                  # Install Claude Code CLI
+    - docker: true                       # Docker for experimentation
+    - certbot: true                      # SSL automation
+
+# Container OS (default: debian/13, can override per-container)
+containers:
+  default_image: "debian/13"
+  overrides: {}
+    # dev: "ubuntu/24.04"      # Uncomment to use Ubuntu for dev
+    # staging: "ubuntu/24.04"
+    # prod: "ubuntu/24.04"
+    # postgres: "debian/13"    # Postgres stays Debian regardless
+
+# Containers to apply common setup (firewall, basic packages)
+common_setup:
+  containers:
+    - dev
+    - staging
+    - prod
+  packages:
+    - ufw
+    - curl
+    - wget
+    - git
+    - vim
+  firewall:
+    allow:
+      - 22/tcp
+      - 80/tcp
+      - 443/tcp
