@@ -97,6 +97,93 @@ def install_extras(ssh: SSHConnection, config: VibehostConfig) -> None:
         console.print("[green]✓ Certbot installed[/green]")
 
 
+def create_setup_scripts(ssh: SSHConnection) -> None:
+    """Create initial setup scripts in the dev container's root directory.
+
+    These scripts help bootstrap new user environments:
+    - setup-user.sh: Creates a passwordless sudoer with SSH keys
+    - setup-murdarch-utils.sh: Clones and installs murdarch-utils from GitHub
+    """
+    console.print("[cyan]Creating setup scripts...[/cyan]")
+
+    exec_cmd = ContainerExec(ssh, "dev")
+
+    # setup-user.sh - creates a passwordless sudoer
+    setup_user_script = '''#!/bin/bash
+# Create a new user with passwordless sudo access
+# Usage: ./setup-user.sh <username>
+
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: $0 <username>"
+    exit 1
+fi
+
+USERNAME="$1"
+
+# Create user with home directory and bash shell
+useradd -m -s /bin/bash "$USERNAME"
+
+# Add to sudo group
+usermod -aG sudo "$USERNAME"
+
+# Configure passwordless sudo
+echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$USERNAME"
+chmod 440 /etc/sudoers.d/"$USERNAME"
+
+# Copy SSH authorized_keys from root if they exist
+if [ -f /root/.ssh/authorized_keys ]; then
+    mkdir -p /home/"$USERNAME"/.ssh
+    cp /root/.ssh/authorized_keys /home/"$USERNAME"/.ssh/
+    chown -R "$USERNAME":"$USERNAME" /home/"$USERNAME"/.ssh
+    chmod 700 /home/"$USERNAME"/.ssh
+    chmod 600 /home/"$USERNAME"/.ssh/authorized_keys
+fi
+
+echo "User '$USERNAME' created with passwordless sudo access"
+echo "SSH keys copied from root (if present)"
+'''
+
+    exec_cmd.write_file("/root/setup-user.sh", setup_user_script, mode="755")
+
+    # setup-murdarch-utils.sh - clones and installs murdarch-utils
+    setup_utils_script = '''#!/bin/bash
+# Clone and install murdarch-utils from GitHub
+# Requires SSH access to git@github.com:murdarch/murdarch-utils.git
+
+set -e
+
+REPO_URL="git@github.com:murdarch/murdarch-utils.git"
+INSTALL_DIR="${HOME}/code/murdarch/utils"
+
+# Create directory structure
+mkdir -p "$(dirname "$INSTALL_DIR")"
+
+# Clone the repository
+if [ -d "$INSTALL_DIR" ]; then
+    echo "Directory $INSTALL_DIR already exists"
+    echo "To update, run: cd $INSTALL_DIR && git pull"
+    exit 0
+fi
+
+git clone "$REPO_URL" "$INSTALL_DIR"
+
+# Run the install script if it exists
+if [ -f "$INSTALL_DIR/install.sh" ]; then
+    cd "$INSTALL_DIR"
+    ./install.sh
+    echo "murdarch-utils installed successfully"
+else
+    echo "Cloned to $INSTALL_DIR (no install.sh found)"
+fi
+'''
+
+    exec_cmd.write_file("/root/setup-murdarch-utils.sh", setup_utils_script, mode="755")
+
+    console.print("[green]✓ Setup scripts created in /root/[/green]")
+
+
 def configure_shell(ssh: SSHConnection, config: VibehostConfig) -> None:
     """Configure shell environment in the dev container."""
     console.print("[cyan]Configuring shell environment...[/cyan]")
@@ -169,5 +256,6 @@ def setup_dev_container(ssh: SSHConnection, config: VibehostConfig) -> None:
     install_node(ssh, config)
     install_extras(ssh, config)
     configure_shell(ssh, config)
+    create_setup_scripts(ssh)
 
     console.print("\n[bold green]✓ Dev container setup complete[/bold green]")
