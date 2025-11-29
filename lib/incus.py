@@ -8,9 +8,22 @@ from lib.ssh import SSHConnection
 console = Console()
 
 
-def install_incus(ssh: SSHConnection) -> None:
-    """Install incus and ZFS from official Debian repos."""
+def get_debian_version(ssh: SSHConnection) -> int:
+    """Get the Debian major version number."""
+    result = ssh.conn.run(
+        "grep VERSION_ID /etc/os-release | cut -d'\"' -f2",
+        hide=True,
+    )
+    return int(result.stdout.strip())
+
+
+def install_incus(ssh: SSHConnection, config: VibehostConfig) -> None:
+    """Install incus and ZFS."""
     console.print("[cyan]Installing Incus and ZFS...[/cyan]")
+
+    debian_version = get_debian_version(ssh)
+    incus_channel = config.incus.channel
+    console.print(f"[dim]Detected Debian {debian_version}[/dim]")
 
     # Install ZFS with DKMS (required for storage backend)
     # Need kernel headers for DKMS to build the module
@@ -25,10 +38,72 @@ def install_incus(ssh: SSHConnection) -> None:
     ssh.sudo("modprobe zfs", hide=True)
     console.print("[dim]  ZFS kernel module loaded[/dim]")
 
-    # Incus is in Debian 13 repos
-    ssh.sudo("apt-get install -y incus incus-client", hide=True)
+    if debian_version >= 13:
+        # Incus is in Debian 13+ repos
+        ssh.sudo("apt-get install -y incus incus-client", hide=True)
+    else:
+        # For Debian 12 and earlier, use Zabbly repository (maintained by Incus developers)
+        console.print(f"[dim]  Adding Zabbly repository for Incus ({incus_channel})...[/dim]")
+        ssh.sudo("apt-get install -y curl gpg", hide=True)
+
+        # Add Zabbly signing key
+        ssh.sudo("mkdir -p /etc/apt/keyrings", hide=True)
+        # Remove any existing key file to avoid gpg errors
+        ssh.sudo("rm -f /etc/apt/keyrings/zabbly.gpg", hide=True)
+        ssh.sudo(
+            "bash -c 'curl -fsSL https://pkgs.zabbly.com/key.asc | gpg --batch --dearmor -o /etc/apt/keyrings/zabbly.gpg'",
+            hide=True,
+        )
+
+        # Add Zabbly repository (lts-6.0 or stable)
+        codename = ssh.conn.run(
+            "grep VERSION_CODENAME /etc/os-release | cut -d= -f2",
+            hide=True,
+        ).stdout.strip()
+
+        repo_line = f"deb [signed-by=/etc/apt/keyrings/zabbly.gpg] https://pkgs.zabbly.com/incus/{incus_channel} {codename} main"
+        ssh.sudo(
+            f"bash -c 'echo \"{repo_line}\" > /etc/apt/sources.list.d/zabbly-incus-{incus_channel}.list'",
+            hide=True,
+        )
+
+        ssh.sudo("apt-get update", hide=True)
+        ssh.sudo("apt-get install -y incus incus-client", hide=True)
+        console.print(f"[dim]  Incus {incus_channel} installed from Zabbly repository[/dim]")
 
     console.print("[green]✓ Incus and ZFS installed[/green]")
+
+
+def prepare_storage_device(ssh: SSHConnection, device: str) -> None:
+    """Prepare a block device for use as ZFS storage.
+
+    Unmounts any existing mounts, removes from fstab, and wipes partition table.
+    """
+    console.print(f"[dim]Preparing storage device {device}...[/dim]")
+
+    # Find any mounts using this device or its partitions
+    result = ssh.conn.run(
+        f"lsblk -n -o MOUNTPOINT {device} 2>/dev/null | grep -v '^$' || true",
+        hide=True,
+    )
+    mountpoints = [m.strip() for m in result.stdout.strip().split("\n") if m.strip()]
+
+    for mount in mountpoints:
+        console.print(f"[yellow]  Unmounting {mount}...[/yellow]")
+        ssh.sudo(f"umount {mount}", hide=True)
+
+    # Remove any fstab entries for this device or its partitions
+    device_basename = device.split("/")[-1]  # e.g., "nvme1n1" from "/dev/nvme1n1"
+    ssh.sudo(
+        f"sed -i '/{device_basename}/d' /etc/fstab",
+        hide=True,
+    )
+
+    # Wipe any existing partition table/filesystem signatures
+    console.print(f"[dim]  Wiping existing signatures on {device}...[/dim]")
+    ssh.sudo(f"wipefs -a {device}", hide=True)
+
+    console.print(f"[green]  Device {device} prepared for ZFS[/green]")
 
 
 def initialize_incus(ssh: SSHConnection, config: VibehostConfig) -> None:
@@ -46,6 +121,8 @@ def initialize_incus(ssh: SSHConnection, config: VibehostConfig) -> None:
     storage_size = config.storage.size if config.storage else "100GiB"
 
     if storage_device:
+        # Prepare the device (unmount, clean fstab, wipe)
+        prepare_storage_device(ssh, storage_device)
         # Use dedicated block device for ZFS
         console.print(f"[dim]Using dedicated device: {storage_device}[/dim]")
         storage_config = f'source: {storage_device}'
@@ -187,7 +264,7 @@ def setup_incus(ssh: SSHConnection, config: VibehostConfig) -> None:
     """Run all incus setup steps."""
     console.print("\n[bold blue]Phase 3: Incus Installation[/bold blue]\n")
 
-    install_incus(ssh)
+    install_incus(ssh, config)
     initialize_incus(ssh, config)
 
     console.print("\n[bold blue]Phase 4: Resource Pool Profiles[/bold blue]\n")

@@ -14,12 +14,50 @@ def install_postgres(ssh: SSHConnection, config: VibehostConfig) -> None:
 
     exec_cmd = ContainerExec(ssh, "postgres")
     version = config.postgres.version
+    use_pgdg = config.postgres.use_pgdg_repo
+
+    if use_pgdg:
+        console.print("[dim]Adding official PostgreSQL (PGDG) repository...[/dim]")
+        # Install prerequisites
+        exec_cmd.run("apt-get update", hide=True)
+        exec_cmd.run("apt-get install -y curl ca-certificates gnupg", hide=True)
+
+        # Add PGDG repo signing key and repository
+        # Remove existing key file to avoid gpg errors
+        exec_cmd.run("rm -f /usr/share/keyrings/postgresql-keyring.gpg", hide=True)
+        exec_cmd.run(
+            "curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | "
+            "gpg --batch --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg",
+            hide=True,
+        )
+
+        # Detect Debian codename
+        codename = exec_cmd.run(
+            "grep VERSION_CODENAME /etc/os-release | cut -d= -f2",
+            hide=True,
+        )
+
+        exec_cmd.run(
+            f'echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] '
+            f'https://apt.postgresql.org/pub/repos/apt {codename}-pgdg main" > '
+            f"/etc/apt/sources.list.d/pgdg.list",
+            hide=True,
+        )
+        console.print(f"[dim]PGDG repository added for {codename}[/dim]")
 
     # Update and install postgres
     exec_cmd.run("apt-get update", hide=True)
     exec_cmd.run(f"apt-get install -y postgresql-{version} postgresql-contrib-{version}", hide=True)
 
-    console.print(f"[green]✓ PostgreSQL {version} installed[/green]")
+    # Also install useful PostgreSQL tools when using PGDG
+    if use_pgdg:
+        exec_cmd.run(
+            f"apt-get install -y postgresql-client-{version} "
+            f"libpq-dev",  # Useful for building psycopg2 etc
+            hide=True,
+        )
+
+    console.print(f"[green]✓ PostgreSQL {version} installed{' (from PGDG)' if use_pgdg else ''}[/green]")
 
 
 def parse_memory_to_mb(memory_str: str) -> int:

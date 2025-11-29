@@ -75,6 +75,33 @@ def wait_for_container(ssh: SSHConnection, name: str, timeout: int = 120) -> boo
     return False
 
 
+def configure_private_network(ssh: SSHConnection, container: str) -> None:
+    """Configure eth1 for DHCP to get private network IP.
+
+    The default Debian container image only has eth0 configured.
+    We need to add systemd-networkd config for eth1 to get DHCP from vibenet-private.
+    """
+    console.print(f"[dim]Configuring private network in {container}...[/dim]")
+
+    exec_cmd = ContainerExec(ssh, container)
+
+    eth1_network = """[Match]
+Name=eth1
+
+[Network]
+DHCP=yes
+
+[DHCPv4]
+UseDomains=true
+UseMTU=true
+
+[DHCP]
+ClientIdentifier=mac
+"""
+    exec_cmd.write_file("/etc/systemd/network/eth1.network", eth1_network)
+    exec_cmd.run("systemctl restart systemd-networkd", hide=True)
+
+
 def setup_container_ssh(ssh: SSHConnection, config: VibehostConfig, container: str) -> None:
     """Set up SSH access in a container."""
     console.print(f"[dim]Setting up SSH in {container}...[/dim]")
@@ -169,6 +196,11 @@ def create_containers(ssh: SSHConnection, config: VibehostConfig) -> None:
     for c in containers:
         if not wait_for_container(ssh, c["name"]):
             raise RuntimeError(f"Container {c['name']} failed to start")
+
+    # Configure private network (eth1) in all containers for DHCP
+    console.print("\n[cyan]Configuring private network in containers...[/cyan]")
+    for c in containers:
+        configure_private_network(ssh, c["name"])
 
     # Set up SSH in public containers
     console.print("\n[cyan]Setting up SSH access in containers...[/cyan]")

@@ -62,7 +62,8 @@ resources:
 
 # Postgres configuration
 postgres:
-  version: "16"
+  version: "17"
+  use_pgdg_repo: false                # Set true to use official PostgreSQL repos (latest versions)
   databases:
     - name: "app_dev"
       user: "app"
@@ -138,6 +139,10 @@ dev_setup:
     - claude_code: true                  # Install Claude Code CLI
     - docker: true                       # Docker for experimentation
     - certbot: true                      # SSL automation
+
+# Incus configuration (for Debian 12, uses Zabbly repos)
+incus:
+  channel: "lts-6.0"              # "lts-6.0" (recommended) or "stable" (latest)
 
 # Container OS (default: debian/13, can override per-container)
 containers:

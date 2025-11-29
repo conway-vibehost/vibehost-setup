@@ -184,15 +184,15 @@ def setup_cron_jobs(ssh: SSHConnection, config: VibehostConfig) -> None:
 
     cron_entries = []
 
-    # Snapshot schedule
+    # Snapshot schedule (root user required for /etc/cron.d format)
     if config.backups.snapshots.enabled:
         schedule = config.backups.snapshots.schedule
-        cron_entries.append(f"{schedule} /usr/local/bin/vibehost-snapshot >> /var/log/vibehost-snapshot.log 2>&1")
+        cron_entries.append(f"{schedule} root /usr/local/bin/vibehost-snapshot >> /var/log/vibehost-snapshot.log 2>&1")
 
     # Offsite schedule
     if config.backups.offsite.enabled:
         schedule = config.backups.offsite.schedule
-        cron_entries.append(f"{schedule} /usr/local/bin/vibehost-offsite-backup >> /var/log/vibehost-offsite.log 2>&1")
+        cron_entries.append(f"{schedule} root /usr/local/bin/vibehost-offsite-backup >> /var/log/vibehost-offsite.log 2>&1")
 
     if cron_entries:
         cron_content = "# vibehost backup jobs\n" + "\n".join(cron_entries) + "\n"

@@ -107,7 +107,8 @@ class DatabaseConfig(BaseModel):
 class PostgresConfig(BaseModel):
     """PostgreSQL configuration."""
 
-    version: str = "16"
+    version: str = "17"
+    use_pgdg_repo: bool = False  # Use official PostgreSQL repos instead of distro
     databases: list[DatabaseConfig]
 
 
@@ -190,6 +191,12 @@ class DevSetupConfig(BaseModel):
         return v
 
 
+class IncusConfig(BaseModel):
+    """Incus installation configuration."""
+
+    channel: Literal["lts-6.0", "stable"] = "lts-6.0"  # LTS recommended for production
+
+
 class ContainersConfig(BaseModel):
     """Container image configuration."""
 
@@ -240,6 +247,7 @@ class VibehostConfig(BaseModel):
     containers: ContainersConfig = Field(default_factory=ContainersConfig)
     common_setup: CommonSetupConfig = Field(default_factory=CommonSetupConfig)
     storage: StorageConfig | None = None  # Optional, uses defaults if not specified
+    incus: IncusConfig = Field(default_factory=IncusConfig)  # Incus channel config
 
 
 def load_config(path: str | Path) -> VibehostConfig:

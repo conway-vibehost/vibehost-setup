@@ -67,13 +67,14 @@ def phase1_validate(config_path: str, dry_run: bool = False) -> tuple[VibehostCo
         sys.exit(1)
     console.print("[green]✓ SSH connection established[/green]")
 
-    # Verify Debian 13
+    # Verify Debian 12+
     console.print("[cyan]Verifying operating system...[/cyan]")
-    if not ssh.verify_debian_13():
+    if not ssh.verify_debian(min_version=12):
         os_info = ssh.get_os_info()
-        console.print(f"[red]✗ Expected Debian 13, found: {os_info.get('PRETTY_NAME', 'unknown')}[/red]")
+        console.print(f"[red]✗ Expected Debian 12+, found: {os_info.get('PRETTY_NAME', 'unknown')}[/red]")
         sys.exit(1)
-    console.print("[green]✓ Debian 13 confirmed[/green]")
+    debian_version = ssh.get_debian_version()
+    console.print(f"[green]✓ Debian {debian_version} confirmed[/green]")
 
     # Check resources
     console.print("[cyan]Checking available resources...[/cyan]")

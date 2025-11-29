@@ -74,9 +74,44 @@ def create_admin_user(ssh: SSHConnection, config: VibehostConfig) -> None:
     console.print(f"[green]✓ Admin user '{username}' created with SSH key[/green]")
 
 
+def verify_ssh_key_access(ssh: SSHConnection, config: VibehostConfig) -> bool:
+    """Verify the admin user can authenticate with SSH key before disabling password auth.
+
+    This is a critical safety check for servers without console access.
+    """
+    console.print("[dim]Verifying SSH key access for admin user...[/dim]")
+
+    # Check that the admin user exists and has the SSH key
+    admin = config.admin.username
+    result = ssh.conn.sudo(f"test -f /home/{admin}/.ssh/authorized_keys", warn=True, hide=True)
+    if not result.ok:
+        console.print(f"[red]Admin user {admin} has no authorized_keys file![/red]")
+        return False
+
+    # Check the key is actually in the file
+    result = ssh.conn.sudo(
+        f"grep -q '{config.admin.ssh_public_key[:50]}' /home/{admin}/.ssh/authorized_keys",
+        warn=True,
+        hide=True,
+    )
+    if not result.ok:
+        console.print(f"[red]SSH key not found in {admin}'s authorized_keys![/red]")
+        return False
+
+    console.print(f"[green]  SSH key verified for {admin}[/green]")
+    return True
+
+
 def harden_ssh(ssh: SSHConnection, config: VibehostConfig) -> None:
     """Harden SSH configuration."""
     console.print("[cyan]Hardening SSH configuration...[/cyan]")
+
+    # Safety check: verify admin can log in with key before disabling password auth
+    if not verify_ssh_key_access(ssh, config):
+        raise RuntimeError(
+            "Cannot verify SSH key access for admin user. "
+            "Refusing to disable password auth to prevent lockout."
+        )
 
     sshd_config = """
 # vibehost hardened SSH config
@@ -152,11 +187,17 @@ def install_crowdsec(ssh: SSHConnection) -> None:
     """Install and configure CrowdSec for intrusion prevention."""
     console.print("[cyan]Installing CrowdSec...[/cyan]")
 
+    # Ensure curl is installed (needed for repo setup)
+    ssh.sudo("apt-get install -y curl", hide=True)
+
     # Add CrowdSec repository - need to run the whole pipeline as root
     ssh.sudo(
         "bash -c 'curl -s https://install.crowdsec.net | bash'",
         hide=True,
     )
+
+    # Update package lists after adding repo
+    ssh.sudo("apt-get update", hide=True)
 
     # Install crowdsec and firewall bouncer
     # Use -o options to handle config file conflicts non-interactively

@@ -164,6 +164,29 @@ def verify_network(ssh: SSHConnection) -> bool:
     return True
 
 
+def configure_ufw_for_incus(ssh: SSHConnection) -> None:
+    """Configure UFW to allow Incus bridge traffic.
+
+    UFW's default 'deny routed' policy blocks container NAT traffic.
+    This adds rules to allow traffic on the incusbr0 and vibenet-private bridges.
+    """
+    console.print("[cyan]Configuring UFW for Incus bridges...[/cyan]")
+
+    # Allow traffic on incusbr0 (Incus default NAT bridge)
+    ssh.sudo("ufw allow in on incusbr0", hide=True)
+    ssh.sudo("ufw allow out on incusbr0", hide=True)
+    ssh.sudo("ufw route allow in on incusbr0", hide=True)
+    ssh.sudo("ufw route allow out on incusbr0", hide=True)
+
+    # Allow traffic on vibenet-private (private network bridge)
+    ssh.sudo("ufw allow in on vibenet-private", hide=True)
+    ssh.sudo("ufw allow out on vibenet-private", hide=True)
+    ssh.sudo("ufw route allow in on vibenet-private", hide=True)
+    ssh.sudo("ufw route allow out on vibenet-private", hide=True)
+
+    console.print("[green]✓ UFW configured for Incus bridges[/green]")
+
+
 def setup_network(ssh: SSHConnection, config: VibehostConfig) -> None:
     """Run all network setup steps."""
     console.print("\n[bold blue]Phase 5: Network Configuration[/bold blue]\n")
@@ -171,6 +194,7 @@ def setup_network(ssh: SSHConnection, config: VibehostConfig) -> None:
     create_private_network(ssh, config)
     create_macvlan_profiles(ssh, config)
     create_private_network_profile(ssh, config)
+    configure_ufw_for_incus(ssh)
 
     if not verify_network(ssh):
         raise RuntimeError("Network verification failed")

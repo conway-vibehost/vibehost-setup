@@ -123,12 +123,23 @@ class SSHConnection:
 
         return info
 
-    def verify_debian_13(self) -> bool:
-        """Verify the server is running Debian 13."""
+    def verify_debian(self, min_version: int = 12) -> bool:
+        """Verify the server is running Debian (minimum version)."""
         info = self.get_os_info()
         is_debian = info.get("ID") == "debian"
-        is_13 = info.get("VERSION_ID", "").startswith("13")
-        return is_debian and is_13
+        try:
+            version = int(info.get("VERSION_ID", "0"))
+        except ValueError:
+            version = 0
+        return is_debian and version >= min_version
+
+    def get_debian_version(self) -> int:
+        """Get the Debian major version number."""
+        info = self.get_os_info()
+        try:
+            return int(info.get("VERSION_ID", "0"))
+        except ValueError:
+            return 0
 
     def get_resources(self) -> dict:
         """Get available system resources."""
