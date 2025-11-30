@@ -75,6 +75,34 @@ def wait_for_container(ssh: SSHConnection, name: str, timeout: int = 120) -> boo
     return False
 
 
+def configure_public_network(
+    ssh: SSHConnection,
+    container: str,
+    ip: str,
+    gateway: str,
+    cidr: str,
+) -> None:
+    """Configure eth0 with a static public IP via systemd-networkd.
+
+    Debian 13+ images don't include cloud-init, so we configure the network
+    directly using systemd-networkd instead of relying on cloud-init profiles.
+    """
+    console.print(f"[dim]Configuring public network in {container} ({ip})...[/dim]")
+
+    exec_cmd = ContainerExec(ssh, container)
+
+    eth0_network = f"""[Match]
+Name=eth0
+
+[Network]
+Address={ip}/{cidr}
+Gateway={gateway}
+DNS=1.1.1.1
+DNS=8.8.8.8
+"""
+    exec_cmd.write_file("/etc/systemd/network/eth0.network", eth0_network)
+
+
 def configure_private_network(ssh: SSHConnection, container: str) -> None:
     """Configure eth1 for DHCP to get private network IP.
 
@@ -99,7 +127,6 @@ UseMTU=true
 ClientIdentifier=mac
 """
     exec_cmd.write_file("/etc/systemd/network/eth1.network", eth1_network)
-    exec_cmd.run("systemctl restart systemd-networkd", hide=True)
 
 
 def setup_container_ssh(ssh: SSHConnection, config: VibehostConfig, container: str) -> None:
@@ -197,10 +224,42 @@ def create_containers(ssh: SSHConnection, config: VibehostConfig) -> None:
         if not wait_for_container(ssh, c["name"]):
             raise RuntimeError(f"Container {c['name']} failed to start")
 
+    # Configure public network (eth0) with static IPs for public containers
+    # Debian 13+ doesn't have cloud-init, so we configure via systemd-networkd
+    console.print("\n[cyan]Configuring public network in containers...[/cyan]")
+
+    # Get network config for CIDR calculation
+    netmask = config.network.netmask
+    if netmask.startswith("255"):
+        mask_map = {
+            "255.255.255.0": "24",
+            "255.255.255.128": "25",
+            "255.255.255.192": "26",
+            "255.255.0.0": "16",
+        }
+        cidr = mask_map.get(netmask, "24")
+    else:
+        cidr = netmask.lstrip("/")
+
+    public_containers = {
+        "dev": config.network.ips.dev,
+        "staging": config.network.ips.staging,
+        "prod": config.network.ips.prod,
+    }
+
+    for name, ip in public_containers.items():
+        configure_public_network(ssh, name, ip, config.network.gateway, cidr)
+
     # Configure private network (eth1) in all containers for DHCP
     console.print("\n[cyan]Configuring private network in containers...[/cyan]")
     for c in containers:
         configure_private_network(ssh, c["name"])
+
+    # Restart networkd in all containers to apply both eth0 and eth1 configs
+    console.print("\n[cyan]Applying network configuration...[/cyan]")
+    for c in containers:
+        exec_cmd = ContainerExec(ssh, c["name"])
+        exec_cmd.run("systemctl restart systemd-networkd", hide=True)
 
     # Set up SSH in public containers
     console.print("\n[cyan]Setting up SSH access in containers...[/cyan]")

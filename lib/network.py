@@ -34,25 +34,15 @@ def create_private_network(ssh: SSHConnection, config: VibehostConfig) -> None:
 
 
 def create_macvlan_profiles(ssh: SSHConnection, config: VibehostConfig) -> None:
-    """Create macvlan network profiles for public IP assignment."""
+    """Create macvlan network profiles for public IP assignment.
+
+    These profiles attach the macvlan network device to containers.
+    The actual IP configuration is done via systemd-networkd in containers.py,
+    since Debian 13+ images don't include cloud-init.
+    """
     console.print("[cyan]Creating macvlan profiles for public IPs...[/cyan]")
 
     interface = config.network.interface
-    gateway = config.network.gateway
-    netmask = config.network.netmask
-
-    # Convert netmask to CIDR if needed
-    if netmask.startswith("255"):
-        # Simple conversion for common masks
-        mask_map = {
-            "255.255.255.0": "24",
-            "255.255.255.128": "25",
-            "255.255.255.192": "26",
-            "255.255.0.0": "16",
-        }
-        cidr = mask_map.get(netmask, "24")
-    else:
-        cidr = netmask.lstrip("/")
 
     # Create a macvlan network
     macvlan_name = "vibenet-public"
@@ -78,25 +68,8 @@ def create_macvlan_profiles(ssh: SSHConnection, config: VibehostConfig) -> None:
         if not result.ok:
             ssh.sudo(f"incus profile create {profile_name}", hide=True)
 
-        # Configure the profile with static IP
-        # We use cloud-init to set the IP since macvlan doesn't support static IPs directly
-        cloud_init = f"""#cloud-config
-network:
-  version: 2
-  ethernets:
-    eth0:
-      addresses:
-        - {ip}/{cidr}
-      gateway4: {gateway}
-      nameservers:
-        addresses:
-          - 1.1.1.1
-          - 8.8.8.8
-"""
-
-        ssh.sudo(f"incus profile set {profile_name} user.network-config='{cloud_init}'", hide=True)
-
         # Add the macvlan device to the profile
+        # Note: IP configuration is done via systemd-networkd in containers.py
         ssh.sudo(
             f"incus profile device add {profile_name} eth0 nic "
             f"network={macvlan_name} name=eth0 || true",
