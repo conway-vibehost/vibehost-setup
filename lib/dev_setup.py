@@ -79,9 +79,8 @@ def install_extras(ssh: SSHConnection, config: VibehostConfig) -> None:
     extras = config.dev_setup.extras
 
     if extras.claude_code:
-        console.print("[dim]Installing Claude Code CLI...[/dim]")
-        exec_cmd.run("npm install -g @anthropic-ai/claude-code", hide=True)
-        console.print("[green]✓ Claude Code CLI installed[/green]")
+        console.print("[dim]Claude Code CLI will be available via setup-claude-code.sh[/dim]")
+        console.print("[green]✓ Claude Code install script created (run as user, not root)[/green]")
 
     if extras.docker:
         console.print("[dim]Installing Docker...[/dim]")
@@ -98,11 +97,12 @@ def install_extras(ssh: SSHConnection, config: VibehostConfig) -> None:
 
 
 def create_setup_scripts(ssh: SSHConnection) -> None:
-    """Create initial setup scripts in the dev container's root directory.
+    """Create initial setup scripts in the dev container.
 
     These scripts help bootstrap new user environments:
-    - setup-user.sh: Creates a passwordless sudoer with SSH keys
-    - setup-murdarch-utils.sh: Clones and installs murdarch-utils from GitHub
+    - /root/setup-user.sh: Creates a passwordless sudoer with SSH keys
+    - /root/setup-murdarch-utils.sh: Clones and installs murdarch-utils from GitHub
+    - /usr/local/bin/setup-claude-code: Installs Claude Code CLI for current user
     """
     console.print("[cyan]Creating setup scripts...[/cyan]")
 
@@ -181,7 +181,49 @@ fi
 
     exec_cmd.write_file("/root/setup-murdarch-utils.sh", setup_utils_script, mode="755")
 
-    console.print("[green]✓ Setup scripts created in /root/[/green]")
+    # setup-claude-code.sh - installs Claude Code for current user (not root)
+    setup_claude_code_script = '''#!/bin/bash
+# Install Claude Code CLI for the current user
+# IMPORTANT: Run this as your user, NOT as root
+# Usage: setup-claude-code
+
+set -e
+
+if [ "$(id -u)" = "0" ]; then
+    echo "ERROR: Do not run this script as root!"
+    echo "Run as your regular user: setup-claude-code"
+    exit 1
+fi
+
+echo "Installing Claude Code CLI for user: $USER"
+
+# Configure npm to use user-local directory (avoids needing root)
+mkdir -p ~/.npm-global
+npm config set prefix ~/.npm-global
+
+# Add to PATH if not already there
+if ! grep -q 'npm-global/bin' ~/.bashrc 2>/dev/null; then
+    echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
+fi
+export PATH=~/.npm-global/bin:$PATH
+
+# Install Claude Code
+npm install -g @anthropic-ai/claude-code
+
+echo ""
+echo "Claude Code installed successfully!"
+echo "Location: $(which claude)"
+echo "Version: $(claude --version)"
+echo ""
+echo "Run 'source ~/.bashrc' or start a new shell, then:"
+echo "  claude login    # to authenticate"
+echo "  claude          # to start"
+'''
+
+    # Put in /usr/local/bin so regular users can access it
+    exec_cmd.write_file("/usr/local/bin/setup-claude-code", setup_claude_code_script, mode="755")
+
+    console.print("[green]✓ Setup scripts created (/root/ and /usr/local/bin/)[/green]")
 
 
 def configure_shell(ssh: SSHConnection, config: VibehostConfig) -> None:
